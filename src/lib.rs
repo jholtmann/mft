@@ -17,9 +17,11 @@ pub mod csv;
 pub mod entry;
 pub mod err;
 pub mod mft;
+pub mod usn_journal;
 
 pub(crate) mod macros;
 pub(crate) mod utils;
 
 #[cfg(test)]
 pub(crate) mod tests;
+
