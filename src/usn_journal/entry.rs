@@ -11,6 +11,7 @@ use std::path::Path;
 use winstructs::timestamp::WinTimestamp;
 
 bitflags! {
+    /// Flags representing the reason for changes that have occurred to a file/directory.
     /// Flag sources:
     /// <https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-fscc/d2a2b53e-bf78-4ef3-90c7-21b918fab304>
     ///
@@ -41,6 +42,7 @@ bitflags! {
 }
 
 impl UsnReasonFlags {
+    /// Get the human-readable explanation for a USN change reason.
     pub fn get_meaning(&self) -> &str {
         match self.bits {
             0x00008000 => {
@@ -91,12 +93,13 @@ impl UsnReasonFlags {
                 "A named stream is added to (or removed from) a file, or a named stream is renamed."
             }
             0x00800000 => "A change is made in the integrity status of a file or directory.",
-            _ => "",
+            _ => "N/A",
         }
     }
 }
 
 bitflags! {
+    /// Flags representing the source of a file/directory change.
     /// Flag sources:
     /// <https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-fscc/d2a2b53e-bf78-4ef3-90c7-21b918fab304>
     ///
@@ -108,6 +111,7 @@ bitflags! {
 }
 
 impl UsnSourceInfoFlags {
+    /// Get the human-readable explanation for a USN change source.
     pub fn get_meaning(&self) -> &str {
         match self.bits {
             0x00000001 => {
@@ -128,11 +132,12 @@ impl UsnSourceInfoFlags {
                 content of the same file that exists in another member of the replica set for the
                 File Replication Service (FRS)."
             }
-            _ => {""}
+            _ => {"N/A"}
         }
     }
 }
 
+/// Represents a single entry in the NTFS USN Journal.
 pub struct UsnJournalEntry {
     /// Total length of the USN record in bytes.
     pub record_length: u32,
@@ -166,13 +171,14 @@ pub struct UsnJournalEntry {
     pub file_attributes: FileAttributeFlags,
     /// Length of the record `file_name` attribute.
     pub file_name_length: u16,
-    /// The offset from the beginning of the structure at which the `file_name` attribute begings.
+    /// The offset from the beginning of the structure at which the `file_name` attribute begins.
     pub file_name_offset: u16,
     /// Unicode representation of the record's file or directory name.
     pub file_name: String,
 }
 
 impl UsnJournalEntry {
+    /// Parse a USN Journal record from a stream.
     pub fn from_buffer<S: Read>(stream: &mut S) -> crate::err::Result<UsnJournalEntry> {
         let record_length = stream.read_u32::<LittleEndian>()?;
         let major_version = stream.read_u16::<LittleEndian>()?;
@@ -238,14 +244,8 @@ impl UsnJournalEntry {
     }
 }
 
-pub trait ParseUsnJournal {
-    fn iter_entries(
-        &mut self,
-    ) -> Box<dyn Iterator<Item = crate::err::Result<UsnJournalEntry>> + '_>;
-}
-
 pub struct UsnJournalParser<T: Read + Seek> {
-    data: T,
+    data: T
 }
 
 impl<T: Read + Seek> Iterator for UsnJournalParser<T> {
@@ -353,8 +353,6 @@ mod tests {
         assert_eq!(record.major_version, 3);
         assert_eq!(record.minor_version, 0);
 
-        // TODO: locate documentation for parsing FileReference to entry and sequence numbers
-
         assert_eq!(record.usn, 6889306208);
         assert_eq!(format!("{}", record.time_stamp), "2019-09-08 00:56:52.138160 UTC");
         assert_eq!(record.reason.bits(), 2);
@@ -366,7 +364,6 @@ mod tests {
         assert_eq!(record.file_name, "CIDownloader.log");
     }
 
-    // entrypoint for clion profiler.
     #[test]
     fn test_file_v2() {
         let sample = usn_journal_sample();
@@ -378,10 +375,7 @@ mod tests {
             assert_eq!(record.record_length, 96);
             assert_eq!(record.major_version, 2);
             assert_eq!(record.minor_version, 0);
-            // assert_eq!(record.file_reference.entry, 115);
-            // assert_eq!(record.file_reference.sequence, 37224);
-            // assert_eq!(record.parent_reference.entry, 141883);
-            // assert_eq!(record.parent_reference.sequence, 7);
+
             assert_eq!(record.usn, 20342374400);
             assert_eq!(format!("{}", record.time_stamp), "2013-10-19 12:16:53.276040 UTC");
             assert_eq!(record.reason.bits(), 2);
