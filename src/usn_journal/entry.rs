@@ -143,10 +143,10 @@ pub struct UsnJournalEntry {
     /// Unique identifier for updated file in file system. Should be unique to the volume and be
     /// stable until the file is deleted. Set to `std::u64::MAX` if a unique ID could not be
     /// established for the file.
-    pub file_reference_number: u64,
+    pub file_reference_number: u128,
     /// Unique identifier for the parent of the USN record file or directory.
     /// See `file_reference_number`.
-    pub parent_file_reference_number: u64,
+    pub parent_file_reference_number: u128,
     /// Value uniquely identifying the USN record on its source volume. Must be greater than zero
     /// and must be set to zero if no USN records have been logged for the file or directory
     /// associated with the record.
@@ -177,8 +177,22 @@ impl UsnJournalEntry {
         let record_length = stream.read_u32::<LittleEndian>()?;
         let major_version = stream.read_u16::<LittleEndian>()?;
         let minor_version = stream.read_u16::<LittleEndian>()?;
-        let file_reference_number = stream.read_u64::<LittleEndian>()?;
-        let parent_file_reference_number = stream.read_u64::<LittleEndian>()?;
+
+        let file_reference_number;
+        let parent_file_reference_number;
+
+        match major_version {
+            2 => {
+                file_reference_number = u128::from(stream.read_u64::<LittleEndian>()?);
+                parent_file_reference_number = u128::from(stream.read_u64::<LittleEndian>()?);
+            },
+            3 => {
+                file_reference_number = stream.read_u128::<LittleEndian>()?;
+                parent_file_reference_number = stream.read_u128::<LittleEndian>()?;
+            },
+            _ => return Err(Error::InvalidUsnVersion)
+        }
+
         let usn = stream.read_i64::<LittleEndian>()?;
 
         let time_stamp = WinTimestamp::from_reader(stream)
@@ -288,7 +302,8 @@ mod tests {
     use crate::tests::fixtures::usn_journal_sample;
     use crate::usn_journal::entry::UsnJournalParser;
 
-    const BUFFER: &[u8] = &[
+    // sample data from https://github.com/forensicmatt/RustyUsn/blob/b01048a57323445545b413aa9c444b796e9bbb34/tests/record_tests.rs
+    const BUFFER_V2: &[u8] = &[
         0x60,0x00,0x00,0x00,0x02,0x00,0x00,0x00,0x73,0x00,0x00,0x00,0x00,0x00,0x68,0x91,
         0x3B,0x2A,0x02,0x00,0x00,0x00,0x07,0x00,0x00,0x00,0x80,0xBC,0x04,0x00,0x00,0x00,
         0x53,0xC7,0x8B,0x18,0xC5,0xCC,0xCE,0x01,0x02,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
@@ -297,18 +312,27 @@ mod tests {
         0x65,0x00,0x72,0x00,0x2E,0x00,0x6C,0x00,0x6F,0x00,0x67,0x00,0x00,0x00,0x00,0x00
     ];
 
+    const BUFFER_V3: &[u8] = &[
+        0x70,0x00,0x00,0x00,0x03,0x00,0x00,0x00,0xB9,0x8A,0x00,0x00,0x00,0x00,0x02,0x00,
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xC8,0x07,0x00,0x00,0x00,0x00,0x02,0x00,
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x60,0x78,0xA2,0x9A,0x01,0x00,0x00,0x00,
+        0xE9,0xB6,0x4E,0x4D,0xE0,0x65,0xD5,0x01,0x02,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+        0x00,0x00,0x00,0x00,0x20,0x00,0x00,0x00,0x20,0x00,0x4C,0x00,0x43,0x00,0x49,0x00,
+        0x44,0x00,0x6F,0x00,0x77,0x00,0x6E,0x00,0x6C,0x00,0x6F,0x00,0x61,0x00,0x64,0x00,
+        0x65,0x00,0x72,0x00,0x2E,0x00,0x6C,0x00,0x6F,0x00,0x67,0x00,0x00,0x00,0x00,0x00
+    ];
+
     #[test]
-    fn test_record() {
-        let mut parser = UsnJournalParser { data: Cursor::new(BUFFER) };
+    fn test_buffer_v2() {
+        let mut parser = UsnJournalParser { data: Cursor::new(BUFFER_V2) };
         let record = parser.next().unwrap().unwrap();
 
         assert_eq!(record.record_length, 96);
         assert_eq!(record.major_version, 2);
         assert_eq!(record.minor_version, 0);
-        // assert_eq!(record.file_reference.entry, 115);
-        // assert_eq!(record.file_reference.sequence, 37224);
-        // assert_eq!(record.parent_reference.entry, 141883);
-        // assert_eq!(record.parent_reference.sequence, 7);
+
+        // TODO: locate documentation for parsing FileReference to entry and sequence numbers
+
         assert_eq!(record.usn, 20342374400);
         assert_eq!(format!("{}", record.time_stamp), "2013-10-19 12:16:53.276040 UTC");
         assert_eq!(record.reason.bits(), 2);
@@ -320,9 +344,31 @@ mod tests {
         assert_eq!(record.file_name, "BTDevManager.log");
     }
 
+    #[test]
+    fn test_buffer_v3() {
+        let mut parser = UsnJournalParser { data: Cursor::new(BUFFER_V3) };
+        let record = parser.next().unwrap().unwrap();
+
+        assert_eq!(record.record_length, 112);
+        assert_eq!(record.major_version, 3);
+        assert_eq!(record.minor_version, 0);
+
+        // TODO: locate documentation for parsing FileReference to entry and sequence numbers
+
+        assert_eq!(record.usn, 6889306208);
+        assert_eq!(format!("{}", record.time_stamp), "2019-09-08 00:56:52.138160 UTC");
+        assert_eq!(record.reason.bits(), 2);
+        assert_eq!(record.source_info.bits(), 0);
+        assert_eq!(record.security_id, 0);
+        assert_eq!(record.file_attributes.bits(), 32);
+        assert_eq!(record.file_name_length, 32);
+        assert_eq!(record.file_name_offset, 76);
+        assert_eq!(record.file_name, "CIDownloader.log");
+    }
+
     // entrypoint for clion profiler.
     #[test]
-    fn test_process_usn_journal() {
+    fn test_file_v2() {
         let sample = usn_journal_sample();
 
         let parser = UsnJournalParser::from_path(sample).unwrap();
